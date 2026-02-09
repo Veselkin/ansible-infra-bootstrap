@@ -1,0 +1,36 @@
+---
+- name: Configure Chrony and Timezone
+  hosts: all
+  become: yes
+  gather_facts: yes
+
+  vars:
+    selected_timezone: "Europe/Samara"
+
+  tasks:
+    - name: Install chrony
+      package:
+        name: chrony
+        state: present
+
+    - name: Set timezone to {{ selected_timezone }}
+      timezone:
+        name: "{{ selected_timezone }}"
+
+    - name: Ensure chrony service is enabled and started
+      service:
+        name: "{{ 'chrony' if ansible_os_family == 'Debian' else 'chronyd' }}"
+        enabled: yes
+        state: started
+      notify: Restart chrony
+
+    # Опционально: заставляем chrony синхронизироваться немедленно
+    - name: Force chrony to sync time immediately
+      command: chronyc makestep
+      changed_when: false
+
+  handlers:
+    - name: Restart chrony
+      service:
+        name: "{{ 'chrony' if ansible_os_family == 'Debian' else 'chronyd' }}"
+        state: restarted
