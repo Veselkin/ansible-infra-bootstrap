@@ -1,0 +1,71 @@
+---
+- name: Install 3x-ui and SSL (Certbot)
+  hosts: all
+  become: yes
+  vars:
+    domain: "ovavpn.chickenkiller.com"
+    email: "79171202120@yandex.ru"
+    panel_port: 61789
+
+  tasks:
+    - name: Update apt cache and install basic dependencies
+      apt:
+        name:
+          - curl
+          - wget
+          - git
+          - certbot
+        state: present
+        update_cache: yes
+
+    # --- Установка 3x-ui ---
+    - name: Download 3x-ui installer
+      get_url:
+        url: https://raw.githubusercontent.com/mhsanaei/3x-ui/master/install.sh
+        dest: /tmp/3x-ui-install.sh
+        mode: '0755'
+
+    - name: Run 3x-ui installer
+      # Передаем ответы скрипту: 
+      # y (подтверждение), admin (user), admin (pass), port
+      shell: echo -e "y\nadmin\nadmin\n{{ panel_port }}" | /tmp/3x-ui-install.sh
+      register: install_3xui
+      changed_when: "'successfully' in install_3xui.stdout"
+
+    # --- Работа с SSL сертификатами ---
+    - name: Stop x-ui before cert generation (to free ports if needed)
+      systemd:
+        name: x-ui
+        state: stopped
+      ignore_errors: yes
+
+    - name: Check if certificates already exist
+      stat:
+        path: "/etc/letsencrypt/live/{{ domain }}/fullchain.pem"
+      register: cert_file
+
+    - name: Generate SSL certificates via Certbot (Standalone)
+      command: >
+        certbot certonly --standalone -d {{ domain }} 
+        --non-interactive --agree-tos --email {{ email }}
+      when: not cert_file.stat.exists
+
+    # --- Настройка и запуск ---
+    - name: Ensure x-ui is enabled and started
+      systemd:
+        name: x-ui
+        enabled: yes
+        state: started
+
+    - name: Print Info
+      debug:
+        msg: 
+          - "Панель установлена на порту: {{ panel_port }}"
+          - "Сертификаты: /etc/letsencrypt/live/{{ domain }}/"
+          - "Не забудьте настроить пути к SSL в самой панели через веб-интерфейс"
+
+  handlers:
+    - name: restart x-ui
+      systemd:
+        name: x-ui
+        state: restarted
