@@ -119,7 +119,7 @@ ansible all -m ping
 ### Запуск плейбуков
 
 ```bash
-ansible-playbook playbooks/site.yml
+ansible-playbook playbooks/setup_time.yml
 ```
 
 ## Безопасность и рекомендации
