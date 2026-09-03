@@ -8,6 +8,21 @@ NC='\033[0m'
 
 echo -e "${GREEN}=== Bootstrap сервера для Ansible (двухэтапный) ===${NC}"
 
+# ---- Проверка наличия необходимых утилит ----
+echo -n "Проверка утилит: "
+MISSING=()
+for cmd in sshpass ssh scp ssh-keygen; do
+    if ! command -v "$cmd" &> /dev/null; then
+        MISSING+=("$cmd")
+    fi
+done
+if [ ${#MISSING[@]} -eq 0 ]; then
+    echo -e "${GREEN}✅ Все необходимые утилиты найдены.${NC}"
+else
+    echo -e "${RED}❌ Отсутствуют: ${MISSING[*]}. Установите их.${NC}"
+    exit 1
+fi
+
 # ---- Ввод данных ----
 read -p "Введите IP-адрес сервера: " SERVER_IP
 read -p "Введите логин для подключения (по умолчанию root): " LOGIN
@@ -17,32 +32,66 @@ echo
 read -p "Введите имя нового пользователя (по умолчанию sysops): " NEW_USER
 NEW_USER=${NEW_USER:-sysops}
 
-# ---- Проверка sshpass ----
-if ! command -v sshpass &> /dev/null; then
-    echo -e "${RED}sshpass не найден. Установите:${NC}"
-    echo "  sudo apt install sshpass   # Debian/Ubuntu"
-    echo "  sudo yum install sshpass   # CentOS/RHEL"
+# ---- Проверка готовности (если ключ уже работает) ----
+KEY_DIR="$HOME/.ssh"
+KEY_FILE="$KEY_DIR/$NEW_USER"
+SSH_OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=5"
+
+if [ -f "$KEY_FILE" ]; then
+    echo -n "Проверка, не настроен ли уже сервер для $NEW_USER: "
+    if ssh -i "$KEY_FILE" -o BatchMode=yes -o PasswordAuthentication=no $SSH_OPTS "$NEW_USER@$SERVER_IP" "echo OK" 2>/dev/null | grep -q OK; then
+        echo -e "${GREEN}✅ Сервер уже настроен. Выход.${NC}"
+        exit 0
+    else
+        echo -e "${YELLOW}⚠️ Ключ есть, но подключение не удалось. Продолжаем настройку...${NC}"
+    fi
+fi
+
+# ---- Проверка доступности порта 22 ----
+echo -n "Проверка порта 22 на $SERVER_IP: "
+if command -v nc &> /dev/null; then
+    if nc -zv -w 3 "$SERVER_IP" 22 &> /dev/null; then
+        echo -e "${GREEN}✅ Доступен.${NC}"
+    else
+        echo -e "${RED}❌ Недоступен.${NC}"
+        exit 1
+    fi
+elif (exec 3<>/dev/tcp/"$SERVER_IP"/22) 2>/dev/null; then
+    echo -e "${GREEN}✅ Доступен.${NC}"
+    exec 3<&-
+else
+    echo -e "${YELLOW}⚠️ Не удалось проверить (nc или /dev/tcp не работают). Продолжаем...${NC}"
+fi
+
+# ---- Проверка возможности подключения с паролем ----
+echo -n "Проверка подключения к $SERVER_IP с паролем: "
+if sshpass -p "$PASSWORD" ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=5 "$LOGIN@$SERVER_IP" "exit" &> /dev/null; then
+    echo -e "${GREEN}✅ Успешно.${NC}"
+else
+    echo -e "${RED}❌ Не удалось подключиться. Проверьте логин/пароль.${NC}"
     exit 1
 fi
 
-# ---- Общие опции SSH для игнорирования known_hosts ----
-SSH_OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
-
 # ---- Генерация ключей (если нет) ----
-KEY_DIR="$HOME/.ssh"
-KEY_FILE="$KEY_DIR/$NEW_USER"
 if [ ! -f "$KEY_FILE" ]; then
-    echo "Генерация SSH-ключа для $NEW_USER (ed25519)..."
+    echo -n "Генерация SSH-ключа для $NEW_USER (ed25519): "
     mkdir -p "$KEY_DIR"
-    ssh-keygen -t ed25519 -C "$NEW_USER" -f "$KEY_FILE" -N "" 2>/dev/null || {
-        echo -e "${YELLOW}ed25519 не поддерживается, генерируем RSA 4096...${NC}"
-        ssh-keygen -t rsa -b 4096 -C "$NEW_USER" -f "$KEY_FILE" -N ""
-    }
+    if ssh-keygen -t ed25519 -C "$NEW_USER" -f "$KEY_FILE" -N "" 2>/dev/null; then
+        echo -e "${GREEN}✅ Сгенерирован.${NC}"
+    else
+        echo -e "${YELLOW}⚠️ ed25519 не поддерживается, пробуем RSA 4096...${NC}"
+        if ssh-keygen -t rsa -b 4096 -C "$NEW_USER" -f "$KEY_FILE" -N ""; then
+            echo -e "${GREEN}✅ Сгенерирован RSA.${NC}"
+        else
+            echo -e "${RED}❌ Ошибка генерации ключа.${NC}"
+            exit 1
+        fi
+    fi
     chmod 700 "$KEY_DIR"
     chmod 600 "$KEY_FILE"
     chmod 644 "$KEY_FILE.pub"
 else
-    echo "Ключ уже существует: $KEY_FILE"
+    echo -e "Ключ уже существует: ${GREEN}$KEY_FILE${NC}"
 fi
 PUBLIC_KEY=$(cat "$KEY_FILE.pub")
 
@@ -97,19 +146,19 @@ chmod 600 /home/\$NEW_USER/.ssh/authorized_keys
 echo "✅ Публичный ключ установлен"
 EOF
 
-# Копирование и запуск первого скрипта
+# Копирование и запуск первого скрипта (подавляем stderr)
 echo "Копирование и запуск скрипта создания пользователя..."
-sshpass -p "$PASSWORD" scp $SSH_OPTS /tmp/setup_user.sh "$LOGIN@$SERVER_IP:/tmp/"
-sshpass -p "$PASSWORD" ssh $SSH_OPTS "$LOGIN@$SERVER_IP" "sudo bash /tmp/setup_user.sh '$PUBLIC_KEY' '$NEW_USER'"
-sshpass -p "$PASSWORD" ssh $SSH_OPTS "$LOGIN@$SERVER_IP" "rm -f /tmp/setup_user.sh"
+sshpass -p "$PASSWORD" scp $SSH_OPTS /tmp/setup_user.sh "$LOGIN@$SERVER_IP:/tmp/" 2>/dev/null
+sshpass -p "$PASSWORD" ssh $SSH_OPTS "$LOGIN@$SERVER_IP" "sudo bash /tmp/setup_user.sh '$PUBLIC_KEY' '$NEW_USER'" 2>/dev/null
+sshpass -p "$PASSWORD" ssh $SSH_OPTS "$LOGIN@$SERVER_IP" "rm -f /tmp/setup_user.sh" 2>/dev/null
 rm -f /tmp/setup_user.sh
 
 # ---- Проверка доступа по ключу (до изменения SSH) ----
-echo -e "\n${GREEN}Проверка подключения по SSH-ключу...${NC}"
+echo -n "Проверка подключения по SSH-ключу: "
 if ssh -i "$KEY_FILE" -o BatchMode=yes -o PasswordAuthentication=no $SSH_OPTS "$NEW_USER@$SERVER_IP" "echo OK" 2>/dev/null | grep -q OK; then
     echo -e "${GREEN}✅ Ключ работает!${NC}"
 else
-    echo -e "${RED}❌ Не удалось подключиться по ключу. Отмена настройки SSH.${NC}"
+    echo -e "${RED}❌ Не удалось подключиться. Отмена настройки SSH.${NC}"
     exit 1
 fi
 
@@ -196,15 +245,15 @@ else
 fi
 EOF
 
-# Копирование и запуск второго скрипта
+# Копирование и запуск второго скрипта (подавляем stderr)
 echo "Копирование и запуск скрипта настройки SSH..."
-sshpass -p "$PASSWORD" scp $SSH_OPTS /tmp/setup_ssh.sh "$LOGIN@$SERVER_IP:/tmp/"
-sshpass -p "$PASSWORD" ssh $SSH_OPTS "$LOGIN@$SERVER_IP" "sudo bash /tmp/setup_ssh.sh '$NEW_USER'"
-sshpass -p "$PASSWORD" ssh $SSH_OPTS "$LOGIN@$SERVER_IP" "rm -f /tmp/setup_ssh.sh"
+sshpass -p "$PASSWORD" scp $SSH_OPTS /tmp/setup_ssh.sh "$LOGIN@$SERVER_IP:/tmp/" 2>/dev/null
+sshpass -p "$PASSWORD" ssh $SSH_OPTS "$LOGIN@$SERVER_IP" "sudo bash /tmp/setup_ssh.sh '$NEW_USER'" 2>/dev/null
+sshpass -p "$PASSWORD" ssh $SSH_OPTS "$LOGIN@$SERVER_IP" "rm -f /tmp/setup_ssh.sh" 2>/dev/null
 rm -f /tmp/setup_ssh.sh
 
 # ---- Финальная проверка ----
-echo -e "\n${GREEN}Финальная проверка подключения по ключу...${NC}"
+echo -n "Финальная проверка подключения по ключу: "
 if ssh -i "$KEY_FILE" -o BatchMode=yes -o PasswordAuthentication=no $SSH_OPTS "$NEW_USER@$SERVER_IP" "echo OK" 2>/dev/null | grep -q OK; then
     echo -e "${GREEN}✅ Всё работает! Сервер готов для Ansible.${NC}"
     echo "Подключайтесь: ssh -i $KEY_FILE $NEW_USER@$SERVER_IP"
