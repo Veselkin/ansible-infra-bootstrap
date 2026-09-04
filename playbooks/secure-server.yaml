@@ -5,9 +5,12 @@
   vars:
     # SSH-порт (если используете стандартный 22, оставьте как есть)
     ssh_port: 22
-    # Дополнительные порты, которые нужно открыть (например, для веб-сервера)
-    additional_ports:
+    # Дополнительные TCP-порты, которые нужно открыть (например, для веб-сервера)
+    additional_tcp_ports:
       - 80
+      - 443
+    # Дополнительные UDP-порты (например, для QUIC/HTTP/3 на 443)
+    additional_udp_ports:
       - 443
 
   tasks:
@@ -35,18 +38,25 @@
         port: "{{ ssh_port }}"
         proto: tcp
 
-    - name: 4. Разрешить дополнительные порты (если указаны)
+    - name: 4a. Разрешить дополнительные TCP-порты (если указаны)
       ufw:
         rule: allow
         port: "{{ item }}"
         proto: tcp
-      loop: "{{ additional_ports }}"
-      when: additional_ports | length > 0
+      loop: "{{ additional_tcp_ports }}"
+      when: additional_tcp_ports | length > 0
+
+    - name: 4b. Разрешить дополнительные UDP-порты (если указаны)
+      ufw:
+        rule: allow
+        port: "{{ item }}"
+        proto: udp
+      loop: "{{ additional_udp_ports }}"
+      when: additional_udp_ports | length > 0
 
     - name: 5. Включить UFW (без подтверждения, так как SSH уже разрешён)
       ufw:
         state: enabled
-      # Важно: эта задача выполняется после добавления правила для SSH
 
     - name: 6. Настроить Fail2ban для защиты SSH
       copy:

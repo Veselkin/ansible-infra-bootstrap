@@ -69,10 +69,11 @@ ansible-playbook -i production setup-time.yaml -e "selected_timezone=Europe/Mosc
 
 ## Переменные
 
-| Имя                | По умолчанию | Описание                                                                          |
-| ------------------ | -----------: | --------------------------------------------------------------------------------- |
-| `ssh_port`         |         `22` | Порт, на котором работает SSH. Важно указать корректно, чтобы не потерять доступ. |
-| `additional_ports` |  `[80, 443]` | Список дополнительных TCP-портов, которые будут разрешены во входящих правилах.   |
+| Имя                    | По умолчанию | Описание                                                     |
+| ---------------------- | -----------: | ------------------------------------------------------------ |
+| `ssh_port`             |         `22` | Порт SSH                                                     |
+| `additional_tcp_ports` |  `[80, 443]` | Список дополнительных TCP-портов                             |
+| `additional_udp_ports` |      `[443]` | Список дополнительных UDP-портов (например, для QUIC/HTTP/3) |
 
 ## Задачи
 
@@ -93,7 +94,8 @@ ansible-playbook -i production setup-time.yaml -e "selected_timezone=Europe/Mosc
 После этого:
 
 * разрешается входящее TCP-соединение на порт `ssh_port`;
-* разрешаются порты из списка `additional_ports`, если список не пуст;
+* разрешаются TCP-порты из списка `additional_tcp_ports`, если список не пуст;
+* разрешаются UDP-порты из списка `additional_udp_ports`, если список не пуст;
 * UFW включается после добавления правила для SSH.
 
 ### Настройка Fail2ban
@@ -126,10 +128,22 @@ maxretry = 5
 
 Если вы меняете порт SSH, не забудьте указать его в инвентаре Ansible, например через `ansible_ssh_port`, либо используйте параметр `--ssh-common-args`.
 
-## Пример запуска с нестандартным портом и дополнительными портами
+## Примеры запуска
+
+### Кастомные списки TCP- и UDP-портов
 
 ```bash
-ansible-playbook -i staging secure-server.yaml -e "ssh_port=2222 additional_ports=[80,443,8080,8443]"
+ansible-playbook -i inventory secure-server.yaml \
+  -e "additional_tcp_ports=[80,443,8080] additional_udp_ports=[443,51820]"
+```
+
+### Если UDP-порты не нужны
+
+Передайте пустой список:
+
+```bash
+ansible-playbook -i inventory secure-server.yaml \
+  -e "additional_udp_ports=[]"
 ```
 
 ## Примечания
