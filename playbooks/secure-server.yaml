@@ -1,0 +1,80 @@
+---
+- name: Настройка базовой защиты сервера (UFW + Fail2ban)
+  hosts: all
+  become: yes
+  vars:
+    # SSH-порт (если используете стандартный 22, оставьте как есть)
+    ssh_port: 22
+    # Дополнительные порты, которые нужно открыть (например, для веб-сервера)
+    additional_ports:
+      - 80
+      - 443
+
+  tasks:
+    - name: 1. Установка UFW и Fail2ban
+      apt:
+        name:
+          - ufw
+          - fail2ban
+        state: present
+        update_cache: yes
+
+    - name: 2a. Запретить все входящие соединения по умолчанию
+      ufw:
+        policy: deny
+        direction: incoming
+
+    - name: 2b. Разрешить все исходящие соединения по умолчанию
+      ufw:
+        policy: allow
+        direction: outgoing
+
+    - name: 3. Разрешить SSH-доступ (чтобы не потерять соединение)
+      ufw:
+        rule: allow
+        port: "{{ ssh_port }}"
+        proto: tcp
+
+    - name: 4. Разрешить дополнительные порты (если указаны)
+      ufw:
+        rule: allow
+        port: "{{ item }}"
+        proto: tcp
+      loop: "{{ additional_ports }}"
+      when: additional_ports | length > 0
+
+    - name: 5. Включить UFW (без подтверждения, так как SSH уже разрешён)
+      ufw:
+        state: enabled
+      # Важно: эта задача выполняется после добавления правила для SSH
+
+    - name: 6. Настроить Fail2ban для защиты SSH
+      copy:
+        dest: /etc/fail2ban/jail.local
+        content: |
+          [DEFAULT]
+          bantime = 3600
+          findtime = 600
+          maxretry = 5
+
+          [sshd]
+          enabled = true
+          port    = {{ ssh_port }}
+          logpath = %(sshd_log)s
+          backend = %(sshd_backend)s
+        owner: root
+        group: root
+        mode: '0644'
+      notify: restart fail2ban
+
+    - name: 7. Запустить и включить Fail2ban
+      systemd:
+        name: fail2ban
+        state: started
+        enabled: yes
+
+  handlers:
+    - name: restart fail2ban
+      systemd:
+        name: fail2ban
+        state: restarted
