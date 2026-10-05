@@ -4,6 +4,7 @@ set -e
 GREEN='\033[0;32m'
 RED='\033[0;31m'
 YELLOW='\033[1;33m'
+CYAN='\033[0;36m'
 NC='\033[0m'
 
 echo -e "${GREEN}=== Bootstrap сервера для Ansible (двухэтапный) ===${NC}"
@@ -31,6 +32,18 @@ read -sp "Введите пароль для $LOGIN: " PASSWORD
 echo
 read -p "Введите имя нового пользователя (по умолчанию sysops): " NEW_USER
 NEW_USER=${NEW_USER:-sysops}
+
+# ---- Удаление старой записи из known_hosts ----
+if [ -f "$HOME/.ssh/known_hosts" ]; then
+    echo -n "Удаление старой записи для $SERVER_IP из known_hosts: "
+    if ssh-keygen -R "$SERVER_IP" 2>/dev/null; then
+        echo -e "${GREEN}✅ Запись удалена.${NC}"
+    else
+        echo -e "${YELLOW}⚠️ Не удалось удалить запись (возможно, её нет).${NC}"
+    fi
+else
+    echo -e "${YELLOW}⚠️ Файл ~/.ssh/known_hosts не найден, пропускаем.${NC}"
+fi
 
 # ---- Проверка готовности (если ключ уже работает) ----
 KEY_DIR="$HOME/.ssh"
@@ -161,6 +174,43 @@ else
     echo -e "${RED}❌ Не удалось подключиться. Отмена настройки SSH.${NC}"
     exit 1
 fi
+
+# ---- ВЫВОД ПРИВАТНОГО КЛЮЧА И ИНСТРУКЦИЯ ----
+echo -e "\n${CYAN}========================================${NC}"
+echo -e "${CYAN}  ⚠  СОХРАНИТЕ ПРИВАТНЫЙ КЛЮЧ!  ⚠${NC}"
+echo -e "${CYAN}========================================${NC}"
+echo -e "${YELLOW}Сейчас будет отключён вход по паролю.${NC}"
+echo -e "${YELLOW}После этого приватный ключ — единственный способ${NC}"
+echo -e "${YELLOW}подключения к серверу. Убедитесь, что вы его сохранили.${NC}"
+echo ""
+echo -e "Путь к ключу на этом компьютере: ${GREEN}$KEY_FILE${NC}"
+echo ""
+echo -e "Содержимое приватного ключа:"
+echo -e "${CYAN}----------------------------------------${NC}"
+cat "$KEY_FILE"
+echo -e "${CYAN}----------------------------------------${NC}"
+echo ""
+echo -e "Как сохранить ключ на другом компьютере:"
+echo -e "  1. Создайте файл:   mkdir -p ~/.ssh && nano ~/.ssh/$NEW_USER"
+echo -e "  2. Вставьте ключ    (содержимое выше, от -----BEGIN до -----END)"
+echo -e "  3. Установите права: chmod 600 ~/.ssh/$NEW_USER"
+echo -e "  4. Подключайтесь:   ssh -i ~/.ssh/$NEW_USER $NEW_USER@$SERVER_IP"
+echo ""
+echo -e "Или скопируйте файл с этого компьютера:"
+echo -e "  scp $KEY_FILE user@другой_компьютер:~/.ssh/$NEW_USER"
+echo ""
+
+# Подтверждение перед отключением пароля
+while true; do
+    read -p "Вы сохранили ключ? Продолжить отключение пароля? (yes/no): " CONFIRM
+    case $CONFIRM in
+        [Yy]*) break ;;
+        [Nn]*) echo -e "${YELLOW}Настройка SSH отменена. Парольный вход остаётся активным.${NC}"
+               echo -e "Ключ уже работает: ssh -i $KEY_FILE $NEW_USER@$SERVER_IP"
+               exit 0 ;;
+        *) echo "Введите yes или no" ;;
+    esac
+done
 
 # ---- ЭТАП 2: Настройка SSH (отключение пароля и т.д.) ----
 echo -e "\n${GREEN}Этап 2: Настройка SSH (отключение пароля, разрешение только ключей)${NC}"
