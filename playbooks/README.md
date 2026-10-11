@@ -4,6 +4,7 @@
 
 * **`setup-time.yaml`** — установка и настройка синхронизации времени (Chrony) и временной зоны.
 * **`secure-server.yaml`** — базовая защита: настройка файрвола (UFW) и системы обнаружения вторжений (Fail2ban).
+* **`hostname-motd/hostname-motd.yaml`** — задаёт hostname из inventory и полностью заменяет MOTD на собственный.
 
 ## Требования
 
