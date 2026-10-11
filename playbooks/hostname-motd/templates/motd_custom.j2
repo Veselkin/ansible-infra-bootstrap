@@ -1,0 +1,45 @@
+#!/bin/bash
+
+# Цвета
+NONE='\033[00m'
+CYAN='\033[01;36m'
+GREEN='\033[01;32m'
+RED='\033[01;31m'
+YELLOW='\033[01;33m'
+PURPLE='\033[01;35m'
+
+# Выводим баннер
+figlet -f slant "{{ motd_figlet_text }}" | echo -e "${PURPLE}$(cat)${NONE}"
+
+# Системная информация
+UPTIME=$(uptime -p)
+LOAD=$(cat /proc/loadavg | awk '{print $1 " " $2 " " $3}')
+MEMORY=$(free -m | awk 'NR==2{printf "Использовано: %sMB / Всего: %sMB (%.2f%%)", $3, $2, $3*100/$2 }')
+DISK=$(df -h / | awk 'NR==2{printf "Использовано: %s / Всего: %s (%s)", $3, $2, $5}')
+IP=$(hostname -I | awk '{print $1}')
+USER_COUNT=$(who | wc -l)
+
+echo -e "${CYAN}================================================================
+  ПРИВЕТСТВИЕ СЕРВЕРА: $(hostname)
+  Дата: $(date)
+${CYAN}================================================================
+${GREEN}  Система:${NONE}   Ubuntu $(lsb_release -rs) LTS
+${GREEN}  Аптайм:${NONE}    $UPTIME
+${GREEN}  Нагрузка:${NONE}  $LOAD
+${GREEN}  Память:${NONE}    $MEMORY
+${GREEN}  Диск (/):${NONE}  $DISK
+${GREEN}  IP адрес:${NONE}  $IP
+${GREEN}  Юзеров:${NONE}    $USER_COUNT"
+
+# Перезагрузка
+if [ -f /var/run/reboot-required ]; then
+    echo -e "${RED}  ВНИМАНИЕ:${NONE} Требуется перезагрузка системы!"
+    if [ -f /var/run/reboot-required.pkgs ]; then
+        echo -e "    Пакеты, требующие перезагрузки:"
+        cat /var/run/reboot-required.pkgs | sed 's/^/    /'
+    fi
+else
+    echo -e "${GREEN}  Перезагрузка:${NONE} Не требуется."
+fi
+
+echo -e "${CYAN}================================================================${NONE}"

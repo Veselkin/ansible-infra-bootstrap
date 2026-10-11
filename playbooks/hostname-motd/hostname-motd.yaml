@@ -1,0 +1,73 @@
+---
+- name: Configure hostname and fully custom MOTD (no ESM ads)
+  hosts: all
+  become: yes
+  gather_facts: yes
+
+  vars:
+    motd_figlet_text: "{{ inventory_hostname }}"
+
+  tasks:
+    - name: Set hostname from inventory
+      ansible.builtin.hostname:
+        name: "{{ inventory_hostname }}"
+      register: hostname_result
+
+    - name: Update /etc/hosts with new hostname
+      ansible.builtin.lineinfile:
+        path: /etc/hosts
+        regexp: '^127\.0\.1\.1\s+'
+        line: "127.0.1.1 {{ inventory_hostname }}"
+        backup: yes
+      when: hostname_result is changed
+
+    - name: Completely purge all existing MOTD scripts
+      when: ansible_facts['os_family'] == "Debian"
+      block:
+        - name: Find all items in /etc/update-motd.d/
+          ansible.builtin.find:
+            paths: /etc/update-motd.d/
+            file_type: any
+            patterns: '*'
+          register: motd_items
+
+        - name: Rename every MOTD item to .disabled
+          ansible.builtin.command:
+            cmd: mv "{{ item.path }}" "{{ item.path }}.disabled"
+            removes: "{{ item.path }}"
+          loop: "{{ motd_items.files }}"
+          when: item.isdir == False
+          register: rename_result
+          changed_when: rename_result.rc == 0
+
+        - name: Install figlet for ASCII banner
+          ansible.builtin.apt:
+            name: figlet
+            state: present
+            update_cache: yes
+
+        - name: Deploy custom MOTD script (single script with all info)
+          ansible.builtin.template:
+            src: motd_custom.j2
+            dest: /etc/update-motd.d/99-custom-motd
+            mode: '0755'
+            backup: yes
+
+        - name: Clear MOTD cache
+          ansible.builtin.file:
+            path: /run/motd.dynamic
+            state: absent
+          ignore_errors: yes
+
+        - name: Also clear any other dynamic cache files
+          ansible.builtin.file:
+            path: /var/lib/update-notifier/updates-available
+            state: absent
+          ignore_errors: yes
+
+        - name: Ensure no other MOTD generators remain (like ubuntu-advantage)
+          ansible.builtin.command:
+            cmd: pro config set apt_news=false
+          ignore_errors: yes
+          register: pro_result
+          changed_when: pro_result.rc == 0
