@@ -1,4 +1,4 @@
-# Ansible: hostname и кастомный MOTD
+# ansible-infra-bootstrap: hostname и кастомный MOTD
 
 Плейбук задаёт hostname из inventory и полностью заменяет MOTD на собственный: отключает все стандартные скрипты `/etc/update-motd.d/` (включая рекламу ESM / Ubuntu Pro) и ставит один свой шаблон с ASCII-баннером.
 
