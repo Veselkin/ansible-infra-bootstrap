@@ -1,0 +1,14 @@
+---
+# Порт панели 3x-ui (можно изменить)
+xui_port: 31789
+
+# Данные для входа в панель
+xui_username: admin
+xui_password: change-me
+
+# Порты, которые должны быть открыты для работы Xray (если предварительно запускали ./secure-server.yaml, то порты уже открыты в UFW)
+xray_ports_tcp:
+  - 80
+  - 443
+xray_ports_udp:
+  - 443

@@ -1,0 +1,98 @@
+---
+- name: Установка 3x-ui на сервер с уже настроенным UFW
+  hosts: all
+  become: yes
+  vars_files:
+    - vars.yaml
+
+  tasks:
+    - name: Установка вспомогательных пакетов
+      apt:
+        name:
+          - curl
+          - jq
+          - lsof
+          - tar
+          - sudo
+        state: present
+        update_cache: yes
+
+    # --- Открываем порты в UFW ---
+    - name: Разрешить TCP-порты для Xray
+      ufw:
+        rule: allow
+        port: "{{ item }}"
+        proto: tcp
+      loop: "{{ xray_ports_tcp }}"
+
+    - name: Разрешить UDP-порты для Xray
+      ufw:
+        rule: allow
+        port: "{{ item }}"
+        proto: udp
+      loop: "{{ xray_ports_udp }}"
+
+    - name: Разрешить порт веб-панели 3x-ui
+      ufw:
+        rule: allow
+        port: "{{ xui_port }}"
+        proto: tcp
+
+    # --- Установка 3x-ui ---
+    - name: Скачать официальный скрипт установки 3x-ui
+      get_url:
+        url: https://raw.githubusercontent.com/mhsanaei/3x-ui/master/install.sh
+        dest: /tmp/install_3x-ui.sh
+        mode: '0755'
+
+    - name: Запустить скрипт установки (без интерактивного ввода)
+      shell: |
+        echo "1" | /tmp/install_3x-ui.sh
+      args:
+        creates: /usr/local/x-ui/x-ui
+
+    - name: Подождать, пока бинарник появится
+      wait_for:
+        path: /usr/local/x-ui/x-ui
+        state: present
+        timeout: 60
+
+    - name: Установить порт панели
+      shell: |
+        /usr/local/x-ui/x-ui setting -port {{ xui_port }}
+      register: set_port_result
+      changed_when: "'already set' not in set_port_result.stdout"
+
+    - name: Установить логин и пароль администратора
+      shell: |
+        /usr/local/x-ui/x-ui setting -username {{ xui_username }} -password {{ xui_password }}
+      register: set_cred_result
+      changed_when: "'already set' not in set_cred_result.stdout"
+
+    # --- Генерация и установка кастомного webBasePath ---
+    - name: Сгенерировать случайный webBasePath
+      set_fact:
+        custom_web_path: "/{{ lookup('password', '/dev/null length=12 chars=ascii_lowercase,digits') }}"
+
+    - name: Установить webBasePath панели
+      command: /usr/local/x-ui/x-ui setting -webBasePath "{{ custom_web_path }}"
+      register: set_webpath_result
+      changed_when: "'already set' not in set_webpath_result.stdout"
+
+    - name: Перезапустить x-ui для применения изменений
+      systemd:
+        name: x-ui
+        state: restarted
+        daemon_reload: yes
+
+    # --- Вывод информации ---
+    - name: Показать информацию (автоматически продолжится через 1 секунду)
+      pause:
+        seconds: 1
+        prompt: |
+          Установка 3x-ui завершена!
+          Панель доступна по адресу: http://{{ ansible_default_ipv4.address }}:{{ xui_port }}{{ custom_web_path }}
+          Логин: {{ xui_username }}
+          Пароль: {{ xui_password }}
+          Внимание: смените пароль после первого входа!
+          Ваш webBasePath: {{ custom_web_path }} (установлен автоматически)
